@@ -28,6 +28,27 @@ const downMoveTrigger = canvas.height - upMoveTrigger;
 var oldSquareMove = [null, null];
 var x = 0, y = 0;
 var color = "black";
+function calculatePositions(squares){
+  var map = {};
+
+  squares.forEach(square=>{
+    if(map[square.color] == undefined){
+      map[square.color] = 0;
+    }
+    map[square.color]++;
+  });
+  var list = Object.values(map);
+  var labels = Object.keys(map);
+
+  var fList = [];
+  labels.forEach((l,i)=>{
+    fList.push({number: list[i], color: l})
+  })
+  fList = fList.sort((a,b)=>{
+    return b.number - a.number;
+  });
+  return fList;
+}
 socket.on('init', ({ players: newPlayers, squares: newSquares, color: newColor }) => {
     updateRefs({ players: newPlayers, squares: newSquares })
     color = newColor;
@@ -226,7 +247,27 @@ function draw() {
     const text = `x: ${Math.floor(currPos[0] / 100)} y: ${Math.floor(currPos[1] / 100)}`;
     ctx.font = '20px Times New Roman';
     ctx.fillText(text, 10, canvas.height - 10);
+    const scores = calculatePositions(squares);
+    var widths = scores.map(score => ctx.measureText(score.number).width);
+    var maxWidth = Math.max(...widths);
+    scores.forEach((square, i)=>{
+        var { color, number } = square;
+        ctx.font = '20px Arial';
+        ctx.fillStyle = color;
+        ctx.strokeStyle = "black";
+        ctx.textAlign = "left";
+        ctx.baseLine = "middle"
+        var percent = (number / squares.length) * 100
+        var text = `${number}`
+        var tWidth = ctx.measureText(number).width;
+        ctx.fillRect(canvas.width - 10 - maxWidth - 30 - Math.max(percent,10), -10+ (i + 1) * 23, Math.max(percent,10),20);
+        ctx.strokeRect(canvas.width - 10 - maxWidth - 30 - Math.max(percent,10), -10+(i + 1) * 23, Math.max(percent,10),20);
 
+        ctx.fillText(text, canvas.width - 10 - tWidth, 10 + (i + 1) * 23);        
+        ctx.strokeText(text, canvas.width - 10 - tWidth, 10 + (i + 1) * 23);        
+
+    })
+    ctx.fillStyle = "black";
     const numPlayers = players.length;
     ctx.font = '20px Times New Roman';
     ctx.textAlign = 'right';
