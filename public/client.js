@@ -1,4 +1,3 @@
-
 var socket = io();
 
 const canvas = document.getElementById('canvas');
@@ -11,8 +10,9 @@ const camera = [0, 0];
 var players = [];
 var squares = [];
 const currPos = [0, 0];
+var zoom = 1;
 
-
+var focused = true;
 var movingLeft = false;
 var movingRight = false;
 var movingUp = false;
@@ -21,33 +21,35 @@ var movingSpeed = 5;
 var movingTwoDirections = false;
 var mouseDown = false;
 var rMouseDown = false;
+var popupOpen = false
 const leftMoveTrigger = canvas.width / 5;
 const rightMoveTrigger = canvas.width - leftMoveTrigger;
 const upMoveTrigger = canvas.height / 5;
 const downMoveTrigger = canvas.height - upMoveTrigger;
-var oldSquareMove = [null, null];
+var lastPos = null;
 var x = 0, y = 0;
 var color = "black";
-function calculatePositions(squares){
-  var map = {};
 
-  squares.forEach(square=>{
-    if(map[square.color] == undefined){
-      map[square.color] = 0;
-    }
-    map[square.color]++;
-  });
-  var list = Object.values(map);
-  var labels = Object.keys(map);
+function calculatePositions(squares) {
+    var map = {};
 
-  var fList = [];
-  labels.forEach((l,i)=>{
-    fList.push({number: list[i], color: l})
-  })
-  fList = fList.sort((a,b)=>{
-    return b.number - a.number;
-  });
-  return fList;
+    squares.forEach(square => {
+        if (map[square.color] == undefined) {
+            map[square.color] = 0;
+        }
+        map[square.color]++;
+    });
+    var list = Object.values(map);
+    var labels = Object.keys(map);
+
+    var fList = [];
+    labels.forEach((l, i) => {
+        fList.push({ number: list[i], color: l })
+    })
+    fList = fList.sort((a, b) => {
+        return b.number - a.number;
+    });
+    return fList;
 }
 socket.on('init', ({ players: newPlayers, squares: newSquares, color: newColor }) => {
     updateRefs({ players: newPlayers, squares: newSquares })
@@ -57,42 +59,84 @@ window.oncontextmenu = function (e) {
     e.preventDefault();
     return false;
 }
+
+function getLine(x0, y0, x1, y1) {
+    var dx = Math.abs(x1 - x0);
+    var dy = Math.abs(y1 - y0);
+    var sx = (x0 < x1) ? 1 : -1;
+    var sy = (y0 < y1) ? 1 : -1;
+    var err = dx - dy;
+    var points = [];
+    while (true) {
+        points.push([x0, y0]);
+        if ((x0 === x1) && (y0 === y1)) break;
+        var e2 = 2 * err;
+        if (e2 > -dy) { err -= dy; x0 += sx; }
+        if (e2 < dx) { err += dx; y0 += sy; }
+    }
+    return points;
+}
+
+function paint(worldX, worldY, event) {
+    const brushSize = Math.max(1, Math.floor(1 / zoom));
+    for (let i = -Math.floor(brushSize / 2); i < Math.ceil(brushSize / 2); i++) {
+        for (let j = -Math.floor(brushSize / 2); j < Math.ceil(brushSize / 2); j++) {
+            const realizedPos = [Math.floor((worldX + i * 100) / 100) * 100, Math.floor((worldY + j * 100) / 100) * 100];
+            socket.emit(event, { pos: realizedPos });
+        }
+    }
+}
+
 canvas.addEventListener('mousedown', (e) => {
     e.preventDefault();
-    var realizedPos = [Math.floor(currPos[0] / 100) * 100, Math.floor(currPos[1] / 100) * 100];
+    if (popupOpen) {
+        closePopup();
+    }
+    if (!focused) {
+        focused = true;
+        canvas.style.cursor = "none";
+        return;
+    }
+    const worldX = (e.clientX + camera[0]) / zoom;
+    const worldY = (e.clientY + camera[1]) / zoom;
+    lastPos = [worldX, worldY];
     if (e.which === 1 || e.button === 0) {
-        socket.emit('click', { pos: realizedPos });
-        oldSquareMove = realizedPos;
         mouseDown = true;
+        paint(worldX, worldY, 'click');
     }
     if (e.which === 3 || e.button === 2) {
-        socket.emit('clear', { pos: realizedPos });
-        oldSquareMove = realizedPos;
         rMouseDown = true;
+        paint(worldX, worldY, 'clear');
     }
     return false;
 });
 canvas.addEventListener('mouseup', (e) => {
     mouseDown = false;
     rMouseDown = false;
+    lastPos = null;
 });
 canvas.addEventListener('mousemove', (e) => {
+    if (!focused) {
+        return;
+    }
     const bounding = canvas.getBoundingClientRect();
     x = e.clientX - bounding.left;
     y = e.clientY - bounding.top;
-    var realizedPos = [Math.floor(currPos[0] / 100) * 100, Math.floor(currPos[1] / 100) * 100];
-    if (mouseDown) {
-        if (realizedPos[0] !== oldSquareMove[0] || realizedPos[1] !== oldSquareMove[1]) {
-            socket.emit('click', { pos: realizedPos });
-            oldSquareMove = realizedPos;
+
+    const worldX = (x + camera[0]) / zoom;
+    const worldY = (y + camera[1]) / zoom;
+
+    if (mouseDown || rMouseDown) {
+        if (lastPos) {
+            const points = getLine(Math.floor(lastPos[0] / 100), Math.floor(lastPos[1] / 100), Math.floor(worldX / 100), Math.floor(worldY / 100));
+            for (const point of points) {
+                paint(point[0] * 100, point[1] * 100, mouseDown ? 'click' : 'clear');
+            }
         }
+        lastPos = [worldX, worldY];
     }
-    if (rMouseDown) {
-        if (realizedPos[0] !== oldSquareMove[0] || realizedPos[1] !== oldSquareMove[1]) {
-            socket.emit('clear', { pos: realizedPos });
-            oldSquareMove = realizedPos;
-        }
-    }
+
+
     var movingConcurrently = 0;
     movingSpeed = 0;
     if (x < leftMoveTrigger) {
@@ -135,16 +179,25 @@ canvas.addEventListener('mousemove', (e) => {
     } else {
         movingTwoDirections = false;
     }
-    changed = true;
 });
+document.addEventListener('keydown', (e) => {
+    console.log(e);
+    if (e.key == 'Escape' && focused) {
+        focused = false;
+        canvas.style.cursor = "auto";
+        return;
+    }
+});
+
 function drawGrid() {
+    if (zoom < 1) return;
     var width = canvas.width;
     var height = canvas.height;
 
     var offSetX = -camera[0];
     var offSetY = -camera[1];
 
-    var spaceBetween = 100;
+    var spaceBetween = 100 * zoom;
     ctx.strokeStyle = 'rgba(0,0,0,0.1)';
     ctx.lineWidth = 1;
     for (var x = offSetX % spaceBetween; x < width; x += spaceBetween) {
@@ -164,12 +217,12 @@ function drawGrid() {
     }
     // draw coodinates
     ctx.fillStyle = 'rgba(0,0,0,0.1)';
-    ctx.font = '20px Arial';
+    ctx.font = 20 * zoom + 'px Arial';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (var x = offSetX % spaceBetween; x < width; x += spaceBetween) {
         for (var y = offSetY % spaceBetween; y < height; y += spaceBetween) {
-            ctx.fillText(`${((x + camera[0]) / 100).toFixed(0)} | ${((y + camera[1]) / 100).toFixed(0)}`, x + 50, y + 50);
+            ctx.fillText(`${((x + camera[0]) / (100 * zoom)).toFixed(0)} | ${((y + camera[1]) / (100 * zoom)).toFixed(0)}`, x + 50 * zoom, y + 50 * zoom);
         }
     }
 }
@@ -177,36 +230,37 @@ function update() {
     socket.emit('mouse', currPos);
 }
 function draw() {
-    if (currPos[0] == x + camera[0] && currPos[1] == y + camera[1]) {
-        changed = false;
-    } else {
-        currPos[0] = x + camera[0];
-        currPos[1] = y + camera[1];
-        changed = true;
-    }
     var speed = movingSpeed;
     if (movingTwoDirections) {
         speed = movingSpeed / Math.sqrt(2);
     }
+    var changed = false;
     if (movingLeft || movingRight || movingUp || movingDown) {
         if (movingLeft) {
             camera[0] -= speed;
-            currPos[0] += speed;
         }
         if (movingRight) {
             camera[0] += speed;
-            currPos[0] -= speed;
         }
         if (movingUp) {
             camera[1] -= speed;
-            currPos[1] += speed;
         }
         if (movingDown) {
             camera[1] += speed;
-            currPos[1] -= speed;
         }
         changed = true;
     }
+
+    const worldX = (x + camera[0]) / zoom;
+    const worldY = (y + camera[1]) / zoom;
+
+    if (currPos[0] != worldX || currPos[1] != worldY) {
+        changed = true;
+        currPos[0] = worldX;
+        currPos[1] = worldY;
+    }
+
+
     if (changed) {
         update();
     }
@@ -214,7 +268,7 @@ function draw() {
     drawGrid();
     squares.forEach((square) => {
         ctx.fillStyle = square.color;
-        ctx.fillRect(Math.floor(square.x / 100) * 100 - camera[0], Math.floor(square.y / 100) * 100 - camera[1], 100, 100);
+        ctx.fillRect(Math.floor(square.x / 100) * 100 * zoom - camera[0], Math.floor(square.y / 100) * 100 * zoom - camera[1], 100 * zoom, 100 * zoom);
     });
     players.forEach((player) => {
         if (player.id == socket.id) return;
@@ -222,7 +276,7 @@ function draw() {
         // circle
         ctx.strokeStyle = 'white';
         ctx.beginPath();
-        ctx.arc(player.x - camera[0] - 5, player.y - camera[1] - 5, 10, 0, 2 * Math.PI);
+        ctx.arc(player.x * zoom - camera[0] - 5 * zoom, player.y * zoom - camera[1] - 5 * zoom, 10 * zoom, 0, 2 * Math.PI);
         ctx.fill();
         ctx.stroke();
         ctx.closePath();
@@ -236,7 +290,8 @@ function draw() {
     // circle
     ctx.strokeStyle = 'white';
     ctx.beginPath();
-    ctx.arc(self.x - camera[0] - 5, self.y - camera[1] - 5, 10, 0, 2 * Math.PI);
+    const brushSize = Math.max(1, Math.floor(1 / zoom));
+    ctx.arc(x, y, (100 * zoom * brushSize) / 2, 0, 2 * Math.PI);
     ctx.fill();
     ctx.stroke();
     ctx.closePath();
@@ -250,7 +305,7 @@ function draw() {
     const scores = calculatePositions(squares);
     var widths = scores.map(score => ctx.measureText(score.number).width);
     var maxWidth = Math.max(...widths);
-    scores.forEach((square, i)=>{
+    scores.forEach((square, i) => {
         var { color, number } = square;
         ctx.font = '20px Arial';
         ctx.fillStyle = color;
@@ -260,11 +315,11 @@ function draw() {
         var percent = (number / squares.length) * 100
         var text = `${number}`
         var tWidth = ctx.measureText(number).width;
-        ctx.fillRect(canvas.width - 10 - maxWidth - 30 - Math.max(percent,10), -10+ (i + 1) * 23, Math.max(percent,10),20);
-        ctx.strokeRect(canvas.width - 10 - maxWidth - 30 - Math.max(percent,10), -10+(i + 1) * 23, Math.max(percent,10),20);
+        ctx.fillRect(canvas.width - 10 - maxWidth - 30 - Math.max(percent, 10), -10 + (i + 1) * 23, Math.max(percent, 10), 20);
+        ctx.strokeRect(canvas.width - 10 - maxWidth - 30 - Math.max(percent, 10), -10 + (i + 1) * 23, Math.max(percent, 10), 20);
 
-        ctx.fillText(text, canvas.width - 10 - tWidth, 10 + (i + 1) * 23);        
-        ctx.strokeText(text, canvas.width - 10 - tWidth, 10 + (i + 1) * 23);        
+        ctx.fillText(text, canvas.width - 10 - tWidth, 10 + (i + 1) * 23);
+        ctx.strokeText(text, canvas.width - 10 - tWidth, 10 + (i + 1) * 23);
 
     })
     ctx.fillStyle = "black";
@@ -341,6 +396,107 @@ socket.on('audio', (data) => {
     audio.play();
 });
 
+const instructionsPopup = document.getElementById('instructions-popup');
+const closeInstructions = document.getElementById('close-instructions');
+
+if (!localStorage.getItem('visited')) {
+    instructionsPopup.style.display = 'block';
+    focused = false;
+    popupOpen = true;
+}
+else {
+    instructionsPopup.style.display = 'none';
+    focused = true;
+    popupOpen = false;
+}
+
+closeInstructions.addEventListener('click', closePopup);
+function closePopup() {
+    instructionsPopup.style.display = 'none';
+    localStorage.setItem('visited', true);
+}
+const evCache = [];
+let prevDiff = -1;
+let lastPointer = null;
+
+canvas.addEventListener('pointerdown', (e) => {
+    evCache.push(e);
+    if (evCache.length === 1) {
+        lastPointer = { x: e.clientX, y: e.clientY };
+    }
+});
+
+canvas.addEventListener('pointermove', (e) => {
+    for (let i = 0; i < evCache.length; i++) {
+        if (e.pointerId == evCache[i].pointerId) {
+            evCache[i] = e;
+            break;
+        }
+    }
+
+    if (evCache.length === 1 && lastPointer) {
+        lastPointer = { x: e.clientX, y: e.clientY };
+    }
+
+    if (evCache.length === 2) {
+        const curDiff = Math.hypot(evCache[0].clientX - evCache[1].clientX, evCache[0].clientY - evCache[1].clientY);
+
+        var oldZoom = zoom;
+        if (prevDiff > 0) {
+            if (curDiff > prevDiff) {
+                zoom *= 1.05;
+            }
+            if (curDiff < prevDiff) {
+                zoom *= 0.95;
+            }
+        }
+        zoom = Math.max(0.01, Math.min(5, zoom));
+        var mouseX = (evCache[0].clientX + evCache[1].clientX) / 2;
+        var mouseY = (evCache[0].clientY + evCache[1].clientY) / 2;
+        var worldX = (mouseX + camera[0]) / oldZoom;
+        var worldY = (mouseY + camera[1]) / oldZoom;
+        camera[0] = worldX * zoom - mouseX;
+        camera[1] = worldY * zoom - mouseY;
+
+
+        prevDiff = curDiff;
+    }
+});
+
+canvas.addEventListener('pointerup', (e) => {
+    for (let i = 0; i < evCache.length; i++) {
+        if (evCache[i].pointerId == e.pointerId) {
+            evCache.splice(i, 1);
+            break;
+        }
+    }
+
+    if (evCache.length < 2) {
+        prevDiff = -1;
+    }
+    if (evCache.length < 1) {
+        lastPointer = null;
+    }
+});
+
+canvas.addEventListener('wheel', (e) => {
+    if (e.ctrlKey) {
+        e.preventDefault();
+        var oldZoom = zoom;
+        if (e.deltaY > 0) {
+            zoom *= 0.95;
+        } else {
+            zoom *= 1.05;
+        }
+        zoom = Math.max(0.01, Math.min(5, zoom));
+        var mouseX = x;
+        var mouseY = y;
+        var worldX = (mouseX + camera[0]) / oldZoom;
+        var worldY = (mouseY + camera[1]) / oldZoom;
+        camera[0] = worldX * zoom - mouseX;
+        camera[1] = worldY * zoom - mouseY;
+    }
+});
 
 
 draw();

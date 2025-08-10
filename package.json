@@ -7,16 +7,18 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node build/index.js",
     "build": "tsc && npm run copy-files",
-    "copy-files": "copy_dir public build/public && copy_dir views build/views"
+    "copy-files": "xcopy /E /I /Y public build\\public && xcopy /E /I /Y views build\\views"
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "canvas": "^3.1.2",
     "express": "^4.19.1",
     "http": "^0.0.1-security",
+    "image-size": "^2.0.2",
     "socket.io": "^4.7.5"
   },
   "devDependencies": {
-    "typescript": "^4.4.4"
+    "typescript": "^5.9.2"
   }
 }
