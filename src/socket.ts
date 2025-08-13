@@ -6,7 +6,9 @@ import imageSize from 'image-size'
 const io = new Server(server);
 
 function randomColor() {
-  return `rgb(${Math.random() * 255}, ${Math.random() * 255}, ${Math.random() * 255})`;
+  const s = squares[Object.keys(squares)[Math.floor(Math.random() * Object.keys(squares).length)]];
+  return s;
+  // return `rgb(${Math.random() * 255}, ${Math.random() * 255}, ${Math.random() * 255})`;
 }
 const players = {};
 const squares = {};
@@ -15,14 +17,14 @@ import fs from 'fs';
 import { convertImageToSquares } from './imageConverter';
 
 (async () => {
-  const buffer = fs.readFileSync('image.png');
+  const buffer = fs.readFileSync('image1.png');
   const { width, height } = imageSize(buffer);
   const canvas = createCanvas(width, height);
   const ctx = canvas.getContext('2d');
   const img = await loadImage(buffer);
   ctx.drawImage(img, 0, 0);
   const imageData = ctx.getImageData(0, 0, width, height);
-  convertImageToSquares(imageData.data, width, height, 8, 25, 2).forEach(square => {
+  convertImageToSquares(imageData.data, width, height, 10, 20, 50).forEach(square => {
     squares[`${square.x}|${square.y}`] = `rgb(${square.color.r}, ${square.color.g}, ${square.color.b})`;
   });
 })();
